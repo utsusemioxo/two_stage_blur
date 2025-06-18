@@ -1,13 +1,17 @@
 #include <benchmark/benchmark.h>
 #include <cstring>
 #include <glog/logging.h>
+#include "OpenCLConvolution.hpp"
 #include "OpenCLRuntime.h"
 #include <opencv2/core/mat.hpp>
+#include <opencv2/highgui.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/opencv.hpp>
 #include <cmath>
 #include <string>
 #include <vector>
+#include <numeric>
+#include <filesystem>
 
 std::string g_input_path;
 std::string g_output_path;
@@ -24,6 +28,29 @@ std::vector<float> createGaussianKernel1D(int radius, float sigma) {
 
   for (auto &v : kernel) {
     v /= sum;
+  }
+
+  return kernel;
+}
+
+std::vector<float> generateGaussianKernel2D(int radius, float sigma) {
+  int ksize = 2 * radius + 1;
+  std::vector<float> kernel(ksize * ksize);
+
+  float sum = 0.0f;
+  const float sigma2 = 2.0f * sigma * sigma;
+
+  for (int y = -radius; y <= radius; ++y) {
+      for (int x = -radius; x <= radius; ++x) {
+          float value = std::exp(-(x * x + y * y) / sigma2);
+          kernel[(y + radius) * ksize + (x + radius)] = value;
+          sum += value;
+      }
+  }
+
+  // Normalize
+  for (auto& v : kernel) {
+      v /= sum;
   }
 
   return kernel;
@@ -84,7 +111,40 @@ static void BM_GaussianBlur1D(benchmark::State& state) {
   cv::imwrite(output_path + filename, output);
 }
 
+static void BM_GaussianBlur2dGPU(benchmark::State& state) {
+  cv::Mat input = cv::imread(g_input_path, cv::IMREAD_COLOR);
+  CHECK(!input.empty()) << "Failed to load image!";
+
+  int radius = static_cast<int>(state.range(0));
+  float sigma = static_cast<float>(state.range(1)) / 10.0f;
+  auto kernel = generateGaussianKernel2D(radius, sigma);
+
+  kumo::OpenCLSeperableConv opencl_conv;
+
+  opencl_conv.Init();
+
+  cv::Mat output;
+  for (auto _ : state) {
+    opencl_conv.Run(input, kernel, output);
+    benchmark::DoNotOptimize(output.data);
+  }
+
+  state.SetItemsProcessed(state.iterations() * input.total());
+  state.SetLabel("GaussianBlur2D_GPU_" + std::to_string(radius) + "_sigma_" + std::to_string(sigma));
+
+  std::string output_path = g_output_path;
+  std::string filename = "_opencl_blurred_radius" + std::to_string(radius) +
+                         "_sigma" + std::to_string(sigma) + ".png";
+  cv::imwrite(output_path + filename, output);
+  opencl_conv.UnInit();
+}
+
 BENCHMARK(BM_GaussianBlur1D)
+  ->Args({3, 15})
+  ->Args({5, 20})
+  ->Args({7,25});
+
+BENCHMARK(BM_GaussianBlur2dGPU)
   ->Args({3, 15})
   ->Args({5, 20})
   ->Args({7,25});
