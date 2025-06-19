@@ -33,7 +33,7 @@ std::vector<float> createGaussianKernel1D(int radius, float sigma) {
   return kernel;
 }
 
-std::vector<float> generateGaussianKernel2D(int radius, float sigma) {
+std::vector<float> createGaussianKernel2D(int radius, float sigma) {
   int ksize = 2 * radius + 1;
   std::vector<float> kernel(ksize * ksize);
 
@@ -117,7 +117,7 @@ static void BM_GaussianBlur2dGPU(benchmark::State& state) {
 
   int radius = static_cast<int>(state.range(0));
   float sigma = static_cast<float>(state.range(1)) / 10.0f;
-  auto kernel = generateGaussianKernel2D(radius, sigma);
+  auto kernel = createGaussianKernel1D(radius, sigma);
 
   kumo::OpenCLSeperableConv opencl_conv;
 

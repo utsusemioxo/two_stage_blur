@@ -31,14 +31,14 @@ __kernel void gaussian_blur(
         int ix = clamp(x + kx - half_k_w, 0, width - 1);
         int iy = clamp(y + ky - half_k_h, 0, height - 1);
 
-        int in_idx = iy * pitch + ix * 3 + c;
+        int in_idx = iy * pitch + ix * CHANNEL_NUM + c;
         uchar pixel = input[in_idx];
         float coeff = gaussian_kernel[ky * k_w + kx];
         sum += (float)pixel * coeff;
       }
     }
 
-    int out_idx = y * pitch + x * 3 + c;
+    int out_idx = y * pitch + x * CHANNEL_NUM + c;
     float result = clamp(sum, 0.0f, 255.0f);
     output[out_idx] = (uchar)result;
   }

@@ -4,6 +4,7 @@
 #include <CL/cl_platform.h>
 #include <benchmark/benchmark.h>
 #include <fstream>
+#include <opencv2/core/hal/interface.h>
 #include <sstream>
 #include <string>
 #include <iostream>
@@ -25,10 +26,14 @@ public:
   void UnInit();
 
   bool BuildKernel(const std::string& source_path, const char* kernel_func_name, cl_kernel* out_kernel, cl_program* out_program);
-  bool RunKernel(cl_kernel kernel, cl_command_queue queue,
-    cl_mem input_buffer, cl_mem output_buffer,
-    cl_mem gaussian_kernel, cl_uint width, cl_uint height,
-    cl_uint pitch, cl_uint k_w, cl_uint k_h);
+  bool RunConvolutionRows(cl_command_queue queue,
+    cl_mem input_buffer, cl_mem temp_buffer,
+    cl_mem gaussian_kernel_1d, cl_uint width, cl_uint height,
+    cl_uint pitch, cl_uint k_w);
+  bool RunConvolutionCols(cl_command_queue queue,
+    cl_mem temp_buffer, cl_mem output_buffer,
+    cl_mem gaussian_kernel_1d, cl_uint width, cl_uint height,
+    cl_uint pitch, cl_uint k_h);
 
   bool Run(const cv::Mat& input, const std::vector<float>& kernel, cv::Mat& output);
   bool IsValid() const;
@@ -41,7 +46,6 @@ private:
   cl_program program_;
   cl_kernel kernel_rows_;
   cl_kernel kernel_cols_;
-  cl_kernel kernel_;
   bool valid_;
 };
 
@@ -90,8 +94,12 @@ inline bool OpenCLSeperableConv::Init() {
   valid_ = true;
 
   BuildKernel(
-    "/home/kumo/dev/hello_ocl_runtime/kernels/gaussian_blur.cl",
-    "gaussian_blur", &kernel_, &program_);
+    "/home/kumo/dev/hello_ocl_runtime/kernels/gaussian_blur_seperate.cl",
+    "gaussian_blur_rows", &kernel_rows_, &program_);
+  
+  BuildKernel(
+    "/home/kumo/dev/hello_ocl_runtime/kernels/gaussian_blur_seperate.cl",
+    "gaussian_blur_cols", &kernel_cols_, &program_);
   return true;
 
   return true;
@@ -154,14 +162,12 @@ inline bool OpenCLSeperableConv::BuildKernel(const std::string& source_path, con
 inline void OpenCLSeperableConv::UnInit() {
   if (kernel_cols_) clReleaseKernel(kernel_cols_);
   if (kernel_rows_) clReleaseKernel(kernel_rows_);
-  if (kernel_) clReleaseKernel(kernel_);
   if (program_) clReleaseProgram(program_);
   if (queue_) clReleaseCommandQueue(queue_);
   if (context_) clReleaseContext(context_);
   // device_ 和 platform_ 不需要释放
   kernel_cols_ = nullptr;
   kernel_rows_ = nullptr;
-  kernel_ = nullptr;
   program_ = nullptr;
   queue_ = nullptr;
   context_ = nullptr;
@@ -171,28 +177,56 @@ inline void OpenCLSeperableConv::UnInit() {
 }
 
 inline bool
-OpenCLSeperableConv::RunKernel(cl_kernel kernel, cl_command_queue queue,
-                               cl_mem input_buffer, cl_mem output_buffer,
-                               cl_mem gaussian_kernel, cl_uint width, cl_uint height,
-                               cl_uint pitch, cl_uint k_w, cl_uint k_h) {
+OpenCLSeperableConv::RunConvolutionRows(cl_command_queue queue,
+  cl_mem input_buffer, cl_mem temp_buffer,
+  cl_mem gaussian_kernel_1d, cl_uint width, cl_uint height,
+  cl_uint pitch, cl_uint k_w) {
   cl_int err;
 
   int arg_index = 0;
-  err  = clSetKernelArg(kernel, arg_index++, sizeof(cl_mem), (void*)&input_buffer);
-  err |= clSetKernelArg(kernel, arg_index++, sizeof(cl_mem), (void*)&output_buffer);
-  err |= clSetKernelArg(kernel, arg_index++, sizeof(cl_mem), (void*)&gaussian_kernel);
-  err |= clSetKernelArg(kernel, arg_index++, sizeof(cl_uint), (void*)&width);
-  err |= clSetKernelArg(kernel, arg_index++, sizeof(cl_uint), (void*)&height);
-  err |= clSetKernelArg(kernel, arg_index++, sizeof(cl_uint), (void*)&pitch);
-  err |= clSetKernelArg(kernel, arg_index++, sizeof(cl_uint), (void*)&k_w);
-  err |= clSetKernelArg(kernel, arg_index++, sizeof(cl_uint), (void*)&k_h);
+  err  = clSetKernelArg(kernel_rows_, arg_index++, sizeof(cl_mem), (void*)&input_buffer);
+  err |= clSetKernelArg(kernel_rows_, arg_index++, sizeof(cl_mem), (void*)&temp_buffer);
+  err |= clSetKernelArg(kernel_rows_, arg_index++, sizeof(cl_mem), (void*)&gaussian_kernel_1d);
+  err |= clSetKernelArg(kernel_rows_, arg_index++, sizeof(cl_uint), (void*)&width);
+  err |= clSetKernelArg(kernel_rows_, arg_index++, sizeof(cl_uint), (void*)&height);
+  err |= clSetKernelArg(kernel_rows_, arg_index++, sizeof(cl_uint), (void*)&pitch);
+  err |= clSetKernelArg(kernel_rows_, arg_index++, sizeof(cl_uint), (void*)&k_w);
   if (err != CL_SUCCESS) {
     std::cerr << "RunKernel failed" << std::endl;
     return false;
   }
 
   size_t globalWorkSize[2] = { (size_t)height, (size_t)width};
-  err = clEnqueueNDRangeKernel(queue, kernel, 2, nullptr, globalWorkSize, nullptr, 0, nullptr, nullptr);
+  err = clEnqueueNDRangeKernel(queue, kernel_rows_, 2, nullptr, globalWorkSize, nullptr, 0, nullptr, nullptr);
+  if (err != CL_SUCCESS) {
+    std::cerr << "clEnqueueNDRangeKernel failed return " << err << std::endl;
+  }
+
+  return true;
+}
+
+inline bool
+OpenCLSeperableConv::RunConvolutionCols(cl_command_queue queue,
+  cl_mem temp_buffer, cl_mem output_buffer,
+  cl_mem gaussian_kernel_1d, cl_uint width, cl_uint height,
+  cl_uint pitch, cl_uint k_h) {
+  cl_int err;
+
+  int arg_index = 0;
+  err |= clSetKernelArg(kernel_cols_, arg_index++, sizeof(cl_mem), (void*)&temp_buffer);
+  err  = clSetKernelArg(kernel_cols_, arg_index++, sizeof(cl_mem), (void*)&output_buffer);
+  err |= clSetKernelArg(kernel_cols_, arg_index++, sizeof(cl_mem), (void*)&gaussian_kernel_1d);
+  err |= clSetKernelArg(kernel_cols_, arg_index++, sizeof(cl_uint), (void*)&width);
+  err |= clSetKernelArg(kernel_cols_, arg_index++, sizeof(cl_uint), (void*)&height);
+  err |= clSetKernelArg(kernel_cols_, arg_index++, sizeof(cl_uint), (void*)&pitch);
+  err |= clSetKernelArg(kernel_cols_, arg_index++, sizeof(cl_uint), (void*)&k_h);
+  if (err != CL_SUCCESS) {
+    std::cerr << "RunKernel failed" << std::endl;
+    return false;
+  }
+
+  size_t globalWorkSize[2] = { (size_t)height, (size_t)width};
+  err = clEnqueueNDRangeKernel(queue, kernel_cols_, 2, nullptr, globalWorkSize, nullptr, 0, nullptr, nullptr);
   if (err != CL_SUCCESS) {
     std::cerr << "clEnqueueNDRangeKernel failed return " << err << std::endl;
   }
@@ -220,6 +254,13 @@ inline bool OpenCLSeperableConv::Run(const cv::Mat& input, const std::vector<flo
     return false;
   }
 
+  cl_mem temp_buf = clCreateBuffer(context_, 
+    CL_MEM_READ_WRITE, image_size * sizeof(uchar), nullptr, &err);
+  if (err != CL_SUCCESS) {
+    std::cerr << "clCreateBuffer temp buffer failed return " << err << std::endl;
+    return false;
+  }
+
   cl_mem output_buf = clCreateBuffer(context_,
     CL_MEM_WRITE_ONLY,
     image_size * sizeof(uchar),
@@ -241,16 +282,21 @@ inline bool OpenCLSeperableConv::Run(const cv::Mat& input, const std::vector<flo
     return false;
   }
 
-  uchar k_w = sqrt(kernel.size());
-  uchar k_h = sqrt(kernel.size());
-  if (k_w * k_h != kernel.size()) {
-    std::cerr << "kernel size incorrect!!!" << k_h << ", " << k_w << ", " << kernel.size() << std::endl;
-  }
-  RunKernel(
-    kernel_, queue_,
-    input_buf, output_buf, kernel_buf,
+  uchar k_w = kernel.size();
+  uchar k_h = kernel.size();
+
+  RunConvolutionRows(
+    queue_,
+    input_buf, temp_buf, kernel_buf,
     width, height, width * channels,
-    k_h, k_w
+    k_w
+  );
+
+  RunConvolutionCols(
+    queue_,
+    temp_buf, output_buf, kernel_buf,
+    width, height, width * channels,
+    k_h
   );
 
   clFinish(queue_);
@@ -267,6 +313,7 @@ inline bool OpenCLSeperableConv::Run(const cv::Mat& input, const std::vector<flo
 
   if (err != CL_SUCCESS) {
     clReleaseMemObject(input_buf);
+    clReleaseMemObject(temp_buf);
     clReleaseMemObject(output_buf);
     clReleaseMemObject(kernel_buf);
     std::cerr << "clEnqueueReadBuffer failed return " << err << std::endl;
@@ -274,6 +321,7 @@ inline bool OpenCLSeperableConv::Run(const cv::Mat& input, const std::vector<flo
 
   output = cv::Mat(height, width, CV_8UC3, output_host.data()).clone();
   clReleaseMemObject(input_buf);
+  clReleaseMemObject(temp_buf);
   clReleaseMemObject(output_buf);
   clReleaseMemObject(kernel_buf);
   return true;
