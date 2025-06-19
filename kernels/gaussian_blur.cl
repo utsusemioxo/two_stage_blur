@@ -28,15 +28,13 @@ __kernel void gaussian_blur(
 
     for (int ky = 0; ky < k_h; ++ky) {
       for (int kx = 0; kx < k_w; kx++) {
-        int ix = x + kx - half_k_w;
-        int iy = y + ky - half_k_h;
+        int ix = clamp(x + kx - half_k_w, 0, width - 1);
+        int iy = clamp(y + ky - half_k_h, 0, height - 1);
 
-        if (ix >= 0 && ix < width && iy >= 0 && iy < height) {
-          int in_idx = iy * pitch + ix * 3 + c;
-          uchar pixel = input[in_idx];
-          float coeff = gaussian_kernel[ky * k_w + kx];
-          sum += (float)pixel * coeff;
-        }
+        int in_idx = iy * pitch + ix * 3 + c;
+        uchar pixel = input[in_idx];
+        float coeff = gaussian_kernel[ky * k_w + kx];
+        sum += (float)pixel * coeff;
       }
     }
 
