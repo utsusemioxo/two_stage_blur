@@ -7,3 +7,4 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_subdirectory(source)
 add_subdirectory(test)
+add_subdirectory(test_scan)

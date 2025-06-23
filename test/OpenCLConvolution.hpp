@@ -101,8 +101,6 @@ inline bool OpenCLSeperableConv::Init() {
     "/home/kumo/dev/hello_ocl_runtime/kernels/gaussian_blur_seperate.cl",
     "gaussian_blur_cols", &kernel_cols_, &program_);
   return true;
-
-  return true;
 }
 
 inline bool OpenCLSeperableConv::BuildKernel(const std::string& source_path, const char* kernel_func_name, cl_kernel* out_kernel, cl_program* out_program) {
