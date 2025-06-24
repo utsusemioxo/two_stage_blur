@@ -1,4 +1,4 @@
-#include "ScanCL.hpp"
+#include "scan_cl.hpp"
 #include <benchmark/benchmark.h>
 #include <cstring>
 #include <glog/logging.h>
@@ -42,10 +42,34 @@ bool is_result_correct(const std::vector<int>& input, const std::vector<int>& ou
   return true;
 }
 
+static void BM_PrefixSumGPU(benchmark::State& state) {
+  size_t array_length = state.range(0);
+  auto input = generate_input(array_length, 0, 255);
+  auto output = std::vector<int>(array_length);
+
+  kumo::ScanCL scan_runtime;
+  scan_runtime.Init();
+  
+  for (auto _ : state) {
+    scan_runtime.Run(input, output);
+    for (int val : output)
+      benchmark::DoNotOptimize(val);
+  }
+
+  if (!is_result_correct(input, output)) {
+    std::cout << "result incorrect!\n";
+  }
+
+  state.SetItemsProcessed(state.iterations() * array_length); // Processed 'array_length' elements in each iteration
+  state.SetLabel("BM_PrefixSumHost" + std::string("_arraylength_") + std::to_string(array_length));
+}
+
+
 static void BM_PrefixSumHost(benchmark::State& state) {
   size_t array_length = state.range(0);
   auto input = generate_input(array_length, 0, 255);
   auto output = std::vector<int>(array_length);
+
 
   for (auto _ : state) {
     ScanHost(input, output);
@@ -62,6 +86,11 @@ static void BM_PrefixSumHost(benchmark::State& state) {
 }
 
 BENCHMARK(BM_PrefixSumHost)
+  ->Args({1024})
+  ->Args({2048})
+  ->Args({4096});
+
+BENCHMARK(BM_PrefixSumGPU)
   ->Args({1024})
   ->Args({2048})
   ->Args({4096});

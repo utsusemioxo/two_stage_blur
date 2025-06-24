@@ -20,15 +20,14 @@ public:
   bool Init();
   void UnInit();
 
+  bool Run(const std::vector<int> &input, const std::vector<int> &output);
+
+private:
   bool BuildKernel(const std::string &source_path, const char *kernel_func_name,
                    cl_kernel *out_kernel, cl_program *out_program);
 
-  bool Run(const std::vector<int> &input, const std::vector<int> &output,
-           size_t batch_size);
-
-private:
   bool ExclusiveScan(cl_command_queue queue, cl_mem input_buffer,
-                     cl_mem temp_buffer, cl_uint batch_size,
+                     cl_mem temp_buffer,
                      cl_uint array_length);
 
 private:
@@ -85,7 +84,7 @@ inline bool ScanCL::Init() {
 
   BuildKernel(
       "/home/kumo/dev/hello_ocl_runtime/test_scan/scan.cl",
-      "gaussian_blur_cols", &kernel_, &program_);
+      "scan", &kernel_, &program_);
   return true;
 }
 
@@ -174,7 +173,7 @@ inline void ScanCL::UnInit() {
 }
 
 inline bool ScanCL::ExclusiveScan(cl_command_queue queue, cl_mem input_buffer,
-                                  cl_mem output_buffer, cl_uint batch_size,
+                                  cl_mem output_buffer, 
                                   cl_uint array_length) {
   cl_int err;
 
@@ -183,9 +182,6 @@ inline bool ScanCL::ExclusiveScan(cl_command_queue queue, cl_mem input_buffer,
                         (void *)&input_buffer);
   err = clSetKernelArg(kernel_, arg_index++, sizeof(cl_mem),
                        (void *)&output_buffer);
-  err |= clSetKernelArg(kernel_, arg_index++, sizeof(cl_mem), (void *)&kernel_);
-  err |= clSetKernelArg(kernel_, arg_index++, sizeof(cl_uint),
-                        (void *)&batch_size);
   err |= clSetKernelArg(kernel_, arg_index++, sizeof(cl_uint),
                         (void *)&array_length);
   if (err != CL_SUCCESS) {
@@ -194,7 +190,7 @@ inline bool ScanCL::ExclusiveScan(cl_command_queue queue, cl_mem input_buffer,
   }
 
   size_t globalWorkSize[2] = {(size_t)array_length};
-  size_t localWorkSize[2] = {(size_t)batch_size};
+  size_t localWorkSize[2] = {(size_t)128};
   err = clEnqueueNDRangeKernel(queue, kernel_, 1, nullptr, globalWorkSize,
                                localWorkSize, 0, nullptr, nullptr);
   if (err != CL_SUCCESS) {
@@ -205,7 +201,7 @@ inline bool ScanCL::ExclusiveScan(cl_command_queue queue, cl_mem input_buffer,
 }
 
 inline bool ScanCL::Run(const std::vector<int> &input,
-                        const std::vector<int> &output, size_t batch_size) {
+                        const std::vector<int> &output) {
 
   cl_int err = CL_SUCCESS;
   cl_mem input_buf =
@@ -224,7 +220,7 @@ inline bool ScanCL::Run(const std::vector<int> &input,
     return false;
   }
 
-  ExclusiveScan(queue_, input_buf, output_buf, input.size(), batch_size);
+  ExclusiveScan(queue_, input_buf, output_buf, input.size());
 
   clFinish(queue_);
 
