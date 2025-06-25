@@ -30,20 +30,20 @@ bool is_result_correct(const std::vector<int>& input, const std::vector<int>& ou
     return false;
   }
 
-  if (output.at(0) != 0) {
-    return false;
-  }
-
-  for (int i = 1; i < input.size(); i++) {
-    if (output.at(i) != input.at(i) + input.at(i-1))
+  int sum = 0;
+  for (int i = 0; i < input.size(); ++i) {
+    if (output.at(i) != sum) {
+      std::cout << "Mismatch at index " << i << ": expected " << sum <<", got " << output.at(i) << std::endl;
       return false;
+    }
+    sum += input[i];
   }
-
   return true;
 }
 
 static void BM_PrefixSumGPU(benchmark::State& state) {
   size_t array_length = state.range(0);
+  size_t tile_size = state.range(1);
   auto input = generate_input(array_length, 0, 255);
   auto output = std::vector<int>(array_length);
 
@@ -51,7 +51,7 @@ static void BM_PrefixSumGPU(benchmark::State& state) {
   scan_runtime.Init();
   
   for (auto _ : state) {
-    scan_runtime.Run(input, output);
+    scan_runtime.Run(input, output, tile_size);
     for (int val : output)
       benchmark::DoNotOptimize(val);
   }
@@ -60,40 +60,40 @@ static void BM_PrefixSumGPU(benchmark::State& state) {
     std::cout << "result incorrect!\n";
   }
 
-  state.SetItemsProcessed(state.iterations() * array_length); // Processed 'array_length' elements in each iteration
-  state.SetLabel("BM_PrefixSumHost" + std::string("_arraylength_") + std::to_string(array_length));
-}
-
-
-static void BM_PrefixSumHost(benchmark::State& state) {
-  size_t array_length = state.range(0);
-  auto input = generate_input(array_length, 0, 255);
-  auto output = std::vector<int>(array_length);
-
-
-  for (auto _ : state) {
-    ScanHost(input, output);
-    for (int val : output)
-      benchmark::DoNotOptimize(val);
-  }
-
-  if (!is_result_correct(input, output)) {
-    std::cout << "result incorrect!\n";
-  }
+  scan_runtime.UnInit();
 
   state.SetItemsProcessed(state.iterations() * array_length); // Processed 'array_length' elements in each iteration
   state.SetLabel("BM_PrefixSumHost" + std::string("_arraylength_") + std::to_string(array_length));
 }
 
-BENCHMARK(BM_PrefixSumHost)
-  ->Args({1024})
-  ->Args({2048})
-  ->Args({4096});
+
+// static void BM_PrefixSumHost(benchmark::State& state) {
+//   size_t array_length = state.range(0);
+//   auto input = generate_input(array_length, 0, 255);
+//   auto output = std::vector<int>(array_length);
+
+
+//   for (auto _ : state) {
+//     ScanHost(input, output);
+//     for (int val : output)
+//       benchmark::DoNotOptimize(val);
+//   }
+
+//   if (!is_result_correct(input, output)) {
+//     std::cout << "result incorrect!\n";
+//   }
+
+//   state.SetItemsProcessed(state.iterations() * array_length); // Processed 'array_length' elements in each iteration
+//   state.SetLabel("BM_PrefixSumHost" + std::string("_arraylength_") + std::to_string(array_length));
+// }
+
+// BENCHMARK(BM_PrefixSumHost)
+//   ->Args({1024})
+//   ->Args({2048})
+//   ->Args({4096});
 
 BENCHMARK(BM_PrefixSumGPU)
-  ->Args({1024})
-  ->Args({2048})
-  ->Args({4096});
+  ->Args({8, 8});
 
 int main(int argc, char** argv) {
   // 先初始化Google Benchmark，解析它的参数

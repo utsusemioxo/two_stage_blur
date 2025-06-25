@@ -20,15 +20,13 @@ public:
   bool Init();
   void UnInit();
 
-  bool Run(const std::vector<int> &input, const std::vector<int> &output);
+  bool Run(const std::vector<int> &input, std::vector<int> &output, const int tile_size);
 
 private:
   bool BuildKernel(const std::string &source_path, const char *kernel_func_name,
                    cl_kernel *out_kernel, cl_program *out_program);
 
-  bool ExclusiveScan(cl_command_queue queue, cl_mem input_buffer,
-                     cl_mem temp_buffer,
-                     cl_uint array_length);
+  bool ExclusiveScan(cl_command_queue queue, cl_mem data, cl_mem tile_sum, int N, int TILE_SIZE);
 
 private:
   cl_platform_id platform_;
@@ -172,27 +170,27 @@ inline void ScanCL::UnInit() {
   platform_ = nullptr;
 }
 
-inline bool ScanCL::ExclusiveScan(cl_command_queue queue, cl_mem input_buffer,
-                                  cl_mem output_buffer, 
-                                  cl_uint array_length) {
+inline bool ScanCL::ExclusiveScan(cl_command_queue queue, cl_mem data, cl_mem tile_sum, int N, int TILE_SIZE) {
   cl_int err;
 
   int arg_index = 0;
+  err  = clSetKernelArg(kernel_, arg_index++, sizeof(cl_mem),
+                        (void *)&data);
   err |= clSetKernelArg(kernel_, arg_index++, sizeof(cl_mem),
-                        (void *)&input_buffer);
-  err = clSetKernelArg(kernel_, arg_index++, sizeof(cl_mem),
-                       (void *)&output_buffer);
-  err |= clSetKernelArg(kernel_, arg_index++, sizeof(cl_uint),
-                        (void *)&array_length);
+                       (void *)&tile_sum);
+  err |= clSetKernelArg(kernel_, arg_index++, TILE_SIZE * sizeof(int),
+                       nullptr);
+  err |= clSetKernelArg(kernel_, arg_index++, sizeof(int),
+                       (void *)&N);
   if (err != CL_SUCCESS) {
     std::cerr << "RunKernel failed" << std::endl;
     return false;
   }
 
-  size_t globalWorkSize[2] = {(size_t)array_length};
-  size_t localWorkSize[2] = {(size_t)128};
-  err = clEnqueueNDRangeKernel(queue, kernel_, 1, nullptr, globalWorkSize,
-                               localWorkSize, 0, nullptr, nullptr);
+  size_t globalWorkSize = ((N + TILE_SIZE - 1) / TILE_SIZE) * TILE_SIZE;
+  size_t localWorkSize = TILE_SIZE;
+  err = clEnqueueNDRangeKernel(queue, kernel_, 1, nullptr, &globalWorkSize,
+                               &localWorkSize, 0, nullptr, nullptr);
   if (err != CL_SUCCESS) {
     std::cerr << "clEnqueueNDRangeKernel failed return " << err << std::endl;
   }
@@ -201,42 +199,45 @@ inline bool ScanCL::ExclusiveScan(cl_command_queue queue, cl_mem input_buffer,
 }
 
 inline bool ScanCL::Run(const std::vector<int> &input,
-                        const std::vector<int> &output) {
+                        std::vector<int> &output,
+                        const int tile_size) {
 
   cl_int err = CL_SUCCESS;
+  
+  output = input;
+
   cl_mem input_buf =
-      clCreateBuffer(context_, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-                     input.size() * sizeof(int), (void *)input.data(), &err);
+      clCreateBuffer(context_, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
+                     output.size() * sizeof(int), (void *)output.data(), &err);
   if (err != CL_SUCCESS) {
-    std::cerr << "clCreateBuffer input_buf failed return " << err << std::endl;
+    std::cerr << "clCreateBuffer data failed return " << err << std::endl;
     return false;
   }
 
-  cl_mem output_buf =
-      clCreateBuffer(context_, CL_MEM_WRITE_ONLY, output.size() * sizeof(int),
-                     nullptr, &err);
+  std::vector<int> temp_vector(tile_size, 0);
+  cl_mem temp_buffer = 
+    clCreateBuffer(context_, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, tile_size * sizeof(int), temp_vector.data(), &err);
   if (err != CL_SUCCESS) {
-    std::cerr << "clCreateBuffer output_buf failed return " << err << std::endl;
+    std::cerr << "clCreateBuffer temp_buffer failed return " << err << std::endl;
     return false;
   }
 
-  ExclusiveScan(queue_, input_buf, output_buf, input.size());
+  ExclusiveScan(queue_, input_buf, temp_buffer, input.size(), tile_size);
 
   clFinish(queue_);
 
-  std::vector<int> output_host(input.size());
-  err = clEnqueueReadBuffer(queue_, output_buf, CL_TRUE, 0,
-                            output_host.size() * sizeof(int),
-                            output_host.data(), 0, nullptr, nullptr);
+  err = clEnqueueReadBuffer(queue_, input_buf, CL_TRUE, 0,
+                            output.size() * sizeof(int),
+                            output.data(), 0, nullptr, nullptr);
 
   if (err != CL_SUCCESS) {
     clReleaseMemObject(input_buf);
-    clReleaseMemObject(output_buf);
+    clReleaseMemObject(temp_buffer);
     std::cerr << "clEnqueueReadBuffer failed return " << err << std::endl;
   }
 
   clReleaseMemObject(input_buf);
-  clReleaseMemObject(output_buf);
+  clReleaseMemObject(temp_buffer);
   return true;
 }
 
