@@ -2,15 +2,13 @@
 
 ## Background
 
-Scan是说，对于一个序列：$x_0, x_1, x_2, \cdots$ 我想要得到:
-$$
-\begin{align*}
+Scan是说，对于一个序列: $x_0, x_1, x_2, \cdots$ 我想要得到:
+
+$$\begin{align*}
 y_0 &= x_0 \\
 y_1 &= x_0 + x_1 \\
 y_2 &= x_0 + x_1 + x_2 \\
-&\cdots
-\end{align*}
-$$
+&\cdots \end{align*}$$
 
 串行版本很简单，时间复杂度和工作量都是 $O(n)$
 
@@ -65,7 +63,9 @@ Down-sweep阶段反过来，我们这里实现的是exclusive scan，所以把�
 ![downsweep](images/downsweep.png)
 
 对于upsweep阶段，我的理解是，upsweep阶段得到的每个节点的左孩子存储了左子树的区间和，例如$A_3$的左子树的范围是$x_0 \cdots x_1$, 那左孩子$A_1$存储的值是$\sum_{i=0}^{1}x_i$，这张图里面我用绿色全部标记了出来。
+
 ![ParallelScan](images/ParallelScan_upsweep.svg)
+
 如何把upsweep的结果，转化成prefix-sum呢？需要在down-sweep阶段：
 - 从根节点一层一层一直到叶子节点
   - 每一层都将父节点的值——也就是已经算的部分前缀和，传到左节点，
