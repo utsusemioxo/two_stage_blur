@@ -3,6 +3,7 @@
 #include <CL/cl.h>
 #include <CL/cl_platform.h>
 #include <benchmark/benchmark.h>
+#include <cstdint>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -14,7 +15,7 @@ class ScanCL {
 public:
   ScanCL()
       : platform_(nullptr), context_(nullptr), device_(nullptr),
-        queue_(nullptr), kernel_(nullptr), program_(nullptr) {};
+        queue_(nullptr), kernel_(nullptr), kernel_uniform_add_(nullptr), program_(nullptr) {};
   ~ScanCL() { UnInit(); };
 
   bool Init();
@@ -35,6 +36,7 @@ private:
   cl_command_queue queue_;
   cl_program program_;
   cl_kernel kernel_;
+  cl_kernel kernel_uniform_add_;
 };
 
 inline bool ScanCL::Init() {
@@ -83,6 +85,10 @@ inline bool ScanCL::Init() {
   BuildKernel(
       "/home/kumo/dev/hello_ocl_runtime/test_scan/scan.cl",
       "scan", &kernel_, &program_);
+
+  BuildKernel(
+      "/home/kumo/dev/hello_ocl_runtime/test_scan/scan.cl",
+      "uniform_add", &kernel_uniform_add_, &program_);
   return true;
 }
 
@@ -155,6 +161,8 @@ inline bool ScanCL::BuildKernel(const std::string &source_path,
 inline void ScanCL::UnInit() {
   if (kernel_)
     clReleaseKernel(kernel_);
+  if (kernel_uniform_add_)
+    clReleaseKernel(kernel_uniform_add_);
   if (program_)
     clReleaseProgram(program_);
   if (queue_)
@@ -163,6 +171,7 @@ inline void ScanCL::UnInit() {
     clReleaseContext(context_);
   // device_ 和 platform_ 不需要释放
   kernel_ = nullptr;
+  kernel_uniform_add_ = nullptr;
   program_ = nullptr;
   queue_ = nullptr;
   context_ = nullptr;
@@ -172,28 +181,90 @@ inline void ScanCL::UnInit() {
 
 inline bool ScanCL::ExclusiveScan(cl_command_queue queue, cl_mem data, cl_mem tile_sum, int N, int TILE_SIZE) {
   cl_int err;
+  std::vector<int> test_1(N, 0);
+  int tile_sum_size = (N + TILE_SIZE - 1) / TILE_SIZE;
+  std::vector<int> test_2(tile_sum_size, 0);
+  std::vector<int> test_3(tile_sum_size, 0);
+  std::vector<int> test_4(N, 0);
+  {
+    int arg_index = 0;
+    err  = clSetKernelArg(kernel_, arg_index++, sizeof(cl_mem), (void *)&data);
+    err |= clSetKernelArg(kernel_, arg_index++, sizeof(cl_mem), (void *)&tile_sum);
+    err |= clSetKernelArg(kernel_, arg_index++, TILE_SIZE * sizeof(int), nullptr);
+    err |= clSetKernelArg(kernel_, arg_index++, sizeof(int), (void *)&N);
+    if (err != CL_SUCCESS) {
+      std::cerr << "RunKernel failed" << std::endl;
+      return false;
+    }
 
-  int arg_index = 0;
-  err  = clSetKernelArg(kernel_, arg_index++, sizeof(cl_mem),
-                        (void *)&data);
-  err |= clSetKernelArg(kernel_, arg_index++, sizeof(cl_mem),
-                       (void *)&tile_sum);
-  err |= clSetKernelArg(kernel_, arg_index++, TILE_SIZE * sizeof(int),
-                       nullptr);
-  err |= clSetKernelArg(kernel_, arg_index++, sizeof(int),
-                       (void *)&N);
-  if (err != CL_SUCCESS) {
-    std::cerr << "RunKernel failed" << std::endl;
-    return false;
+    size_t globalWorkSize = ((N + TILE_SIZE - 1) / TILE_SIZE) * TILE_SIZE;
+    size_t localWorkSize = TILE_SIZE;
+    err = clEnqueueNDRangeKernel(queue, kernel_, 1, nullptr, &globalWorkSize,
+                                &localWorkSize, 0, nullptr, nullptr);
+    clFinish(queue_);
+    if (err != CL_SUCCESS) {
+      std::cerr << "clEnqueueNDRangeKernel failed return " << err << std::endl;
+    }
+
+
+    err = clEnqueueReadBuffer(queue_, data, CL_TRUE, 0,
+                              test_1.size() * sizeof(int), test_1.data(), 0,
+                              nullptr, nullptr);
+    err = clEnqueueReadBuffer(queue_, tile_sum, CL_TRUE, 0,
+                              test_2.size() * sizeof(int), test_2.data(), 0,
+                              nullptr, nullptr);
+    std::cout << "finish tile scan" << std::endl;
   }
 
-  size_t globalWorkSize = ((N + TILE_SIZE - 1) / TILE_SIZE) * TILE_SIZE;
-  size_t localWorkSize = TILE_SIZE;
-  err = clEnqueueNDRangeKernel(queue, kernel_, 1, nullptr, &globalWorkSize,
-                               &localWorkSize, 0, nullptr, nullptr);
-  if (err != CL_SUCCESS) {
-    std::cerr << "clEnqueueNDRangeKernel failed return " << err << std::endl;
+  {
+    int arg_index = 0;
+    int tile_sum_size = (N + TILE_SIZE - 1) / TILE_SIZE;
+    err  = clSetKernelArg(kernel_, arg_index++, sizeof(cl_mem), (void*)&tile_sum);
+    err |= clSetKernelArg(kernel_, arg_index++, sizeof(cl_mem), (void*)NULL);
+    err |= clSetKernelArg(kernel_, arg_index++, sizeof(cl_mem), (void*)NULL);
+    err |= clSetKernelArg(kernel_, arg_index++, sizeof(int), (void*)&tile_sum_size);
+    if (err != CL_SUCCESS) {
+      std::cerr << "RunKernel failed" << std::endl;
+      return false;
+    }
+    
+    size_t localWorkSize = tile_sum_size;
+    size_t globalWorkSize = localWorkSize;
+    if (globalWorkSize > TILE_SIZE) {
+      std::cerr << "invalid size! globalWorkSize=" << globalWorkSize << " TILE_SIZE=" << TILE_SIZE << std::endl;
+      return false;
+    }
+    err = clEnqueueNDRangeKernel(queue, kernel_, 1, nullptr, &globalWorkSize,
+                                 &localWorkSize, 0, nullptr, nullptr);
+    clFinish(queue_);
+    if (err != CL_SUCCESS) {
+      std::cerr << "clEnqueueNDRangeKernel failed return " << err << std::endl;
+    }
+    err = clEnqueueReadBuffer(queue_, tile_sum, CL_TRUE, 0,
+      test_3.size() * sizeof(int),
+      test_3.data(), 0, nullptr, nullptr);
+    std::cout << "finish offset scan" << std::endl;
   }
+
+  {
+    int arg_index = 0;
+    err  = clSetKernelArg(kernel_uniform_add_, arg_index++, sizeof(cl_mem), (void*)&data);
+    err |= clSetKernelArg(kernel_uniform_add_, arg_index++, sizeof(cl_mem), (void*)&tile_sum); 
+    err |= clSetKernelArg(kernel_uniform_add_, arg_index++, sizeof(int), (void*)&N);
+    err |= clSetKernelArg(kernel_uniform_add_, arg_index++, sizeof(int), (void*)&TILE_SIZE);
+    size_t globalWorkSize = ((N + TILE_SIZE - 1) / TILE_SIZE) * TILE_SIZE;
+    size_t localWorkSize = TILE_SIZE;
+    clEnqueueNDRangeKernel(queue, kernel_uniform_add_, 1, nullptr, &globalWorkSize, &localWorkSize, 0, nullptr, nullptr);
+    clFinish(queue_);
+    if (err != CL_SUCCESS) {
+      std::cerr << "clEnqueueNDRangeKernel failed return " << err << std::endl;
+    }
+    err = clEnqueueReadBuffer(queue_, data, CL_TRUE, 0,
+      test_4.size() * sizeof(int),
+      test_4.data(), 0, nullptr, nullptr);
+    std::cout << "finish uniform add" << std::endl;
+  }
+
 
   return true;
 }
@@ -224,7 +295,6 @@ inline bool ScanCL::Run(const std::vector<int> &input,
 
   ExclusiveScan(queue_, input_buf, temp_buffer, input.size(), tile_size);
 
-  clFinish(queue_);
 
   err = clEnqueueReadBuffer(queue_, input_buf, CL_TRUE, 0,
                             output.size() * sizeof(int),

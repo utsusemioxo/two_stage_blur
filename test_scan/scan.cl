@@ -48,7 +48,7 @@ __kernel void scan(
     // [a0][a0+a1][a2][a0+a1+a2+a3][a4][a4+a5][a6][a0+a1+a2+a3+a4+a5+a6+a7]
     // => temp[7] += temp[3]
     // Now temp[7] holds the total sum
-    for (int offset = 1; offset < lsize; offset <<=2) { // from leaf to root
+    for (int offset = 1; offset < lsize; offset <<=1) { // from leaf to root
         int index = (lid + 1) * offset * 2 - 1;
         if (index < lsize) {
             temp[index] += temp[index - offset];
@@ -128,4 +128,16 @@ __kernel void scan(
     }
 
     data[gid] = temp[lid];
+}
+
+
+__kernel void uniform_add(
+    __global int* data,
+    __global int* tile_sums,
+    int N,
+    int TILE_SIZE
+) {
+    int gid = get_global_id(0);
+    int tile_id = gid / TILE_SIZE;
+    data[gid] += tile_sums[tile_id];
 }

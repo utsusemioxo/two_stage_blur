@@ -6,6 +6,9 @@
 #include <random>
 #include <string>
 
+std::vector<int> input;
+std::vector<int> output;
+
 std::vector<int> generate_input(int length, int min_val = 0, int max_val = 255) {
   std::random_device rd;
   std::mt19937 gen(rd());
@@ -44,8 +47,8 @@ bool is_result_correct(const std::vector<int>& input, const std::vector<int>& ou
 static void BM_PrefixSumGPU(benchmark::State& state) {
   size_t array_length = state.range(0);
   size_t tile_size = state.range(1);
-  auto input = generate_input(array_length, 0, 255);
-  auto output = std::vector<int>(array_length);
+  input = generate_input(array_length, 0, 9);
+  output = std::vector<int>(array_length);
 
   kumo::ScanCL scan_runtime;
   scan_runtime.Init();
@@ -93,7 +96,7 @@ static void BM_PrefixSumGPU(benchmark::State& state) {
 //   ->Args({4096});
 
 BENCHMARK(BM_PrefixSumGPU)
-  ->Args({8, 8});
+  ->Args({16, 4});
 
 int main(int argc, char** argv) {
   // 先初始化Google Benchmark，解析它的参数
