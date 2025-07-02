@@ -96,7 +96,7 @@ static void BM_PrefixSumGPU(benchmark::State& state) {
 //   ->Args({4096});
 
 BENCHMARK(BM_PrefixSumGPU)
-  ->Args({16, 4});
+  ->Args({12, 4})->Iterations(1);
 
 int main(int argc, char** argv) {
   // 先初始化Google Benchmark，解析它的参数

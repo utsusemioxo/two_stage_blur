@@ -28,7 +28,19 @@ private:
                    cl_kernel *out_kernel, cl_program *out_program);
 
   bool ExclusiveScan(cl_command_queue queue, cl_mem data, cl_mem tile_sum, int N, int TILE_SIZE);
-
+  size_t nextPowerOfTwo(size_t n) {
+    if (n == 0) return 1;
+    --n;
+    n |= n >> 1;
+    n |= n >> 2;
+    n |= n >> 4;
+    n |= n >> 8;
+    n |= n >> 16;
+  #if SIZE_MAX > 0xFFFFFFFF
+    n |= n >> 32;  // Only for 64-bit size_t
+  #endif
+    return n + 1;
+  }
 private:
   cl_platform_id platform_;
   cl_context context_;
@@ -218,7 +230,7 @@ inline bool ScanCL::ExclusiveScan(cl_command_queue queue, cl_mem data, cl_mem ti
 
   {
     int arg_index = 0;
-    int tile_sum_size = (N + TILE_SIZE - 1) / TILE_SIZE;
+    int tile_sum_size = nextPowerOfTwo((N + TILE_SIZE - 1) / TILE_SIZE);
     err  = clSetKernelArg(kernel_, arg_index++, sizeof(cl_mem), (void*)&tile_sum);
     err |= clSetKernelArg(kernel_, arg_index++, sizeof(cl_mem), (void*)NULL);
     err |= clSetKernelArg(kernel_, arg_index++, sizeof(cl_mem), (void*)NULL);
@@ -269,6 +281,8 @@ inline bool ScanCL::ExclusiveScan(cl_command_queue queue, cl_mem data, cl_mem ti
   return true;
 }
 
+
+
 inline bool ScanCL::Run(const std::vector<int> &input,
                         std::vector<int> &output,
                         const int tile_size) {
@@ -285,7 +299,9 @@ inline bool ScanCL::Run(const std::vector<int> &input,
     return false;
   }
 
-  std::vector<int> temp_vector(tile_size, 0);
+  // need to padding to length of 2^n, because this temp_vector need to do scan later, our scan kernel only support 2^n length
+  int tile_sum_size = (input.size() + tile_size - 1) / tile_size;
+  std::vector<int> temp_vector(nextPowerOfTwo(tile_sum_size), 0);
   cl_mem temp_buffer = 
     clCreateBuffer(context_, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, tile_size * sizeof(int), temp_vector.data(), &err);
   if (err != CL_SUCCESS) {
